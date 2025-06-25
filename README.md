@@ -10,7 +10,7 @@ Whether you're building a scalping bot, strategy tester, or visual market monito
 
 ### ✅ Real-Time Engine
 
-- Tick-level market data listener (tested with Bybit WebSocket)
+- Tick-level market data listener (tested with [Bybit](https://www.bybit.com/en/) WebSocket)
 - Real-time candle aggregation across **unlimited timeframes**
 - Candle-based **live signal calculation** on *every single tick*
 - Supports **multiple concurrent signals** per timeframe
@@ -47,7 +47,7 @@ Whether you're building a scalping bot, strategy tester, or visual market monito
 ## 🧩 Stack
 
 - **Backend:** Go (performance-first, concurrency-ready)
-- **Frontend:** JavaScript + TradingView-compatible chart
+- **Frontend:** JavaScript + [TradingView](https://www.tradingview.com/) chart
 - **API:** WebSocket for market data + REST for execution
 
 ---
@@ -61,7 +61,7 @@ Whether you're building a scalping bot, strategy tester, or visual market monito
 ## 📦 Installation
 
 ```bash
-git clone https://github.com/yourname/gotrade
+git clone https://github.com/kirill-a-belov/gotrade
 cd gotrade
 go build
 ./gotrade
