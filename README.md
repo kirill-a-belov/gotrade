@@ -54,7 +54,6 @@ Whether you're building a scalping bot, strategy tester, or visual market monito
 
 ## 📷 Screenshot
 
-> *(Insert your image here in Base64 or as a file in the repo)*  
 ![Preview of GoTrade in action](./screenshot.png)
 
 ---
