@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Trader</title>
+  <link rel="icon" href="./favicon.jpg" />
+  <script src="./lightweight-charts.standalone.production.js"></script>
+  <style>
+    body {
+      margin: 0;
+      background-color: #1E1E1E;
+      color: #fff;
+      font-family: Arial, sans-serif;
+      user-select: none;
+    }
+    #chart {
+      width: 100%;
+      height: 880px;
+      position: relative;
+    }
+    #tooltip {
+      position: absolute;
+      display: none;
+      padding: 10px;
+      background: rgba(30, 30, 30, 0.95);
+      color: #fff;
+      border-radius: 6px;
+      font-size: 13px;
+      pointer-markers: none;
+      max-width: 340px;
+      line-height: 1.4;
+      z-index: 1000;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.8);
+      font-weight: 500;
+      user-select: none;
+      transition: opacity 0.15s ease-in-out;
+    }
+    .modal {
+      position: fixed;
+      z-index: 1000;
+      left: 0; top: 0;
+      width: 100%; height: 100%;
+      background-color: rgba(0,0,0,0.4);
+      user-select: text;
+
+    }
+    .modal-content {
+      background-color: rgba(30, 30, 30, 0.80);
+      margin: 5% auto;
+      padding: 20px;
+      width: 30%;
+      max-height: 100%;
+      overflow-y: auto;
+      border-radius: 6px;
+      font-size: 13px;
+      user-select: text;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.8);
+        scrollbar-color: rgba(100,100,100,0.2) rgba(30, 30, 30, 0.80);
+        scrollbar-width: thin;
+    }
+  </style>
+</head>
+<body>
+<div id="chart"></div>
+<div id="tooltip"></div>
+<div id="tradeModal" class="modal" style="display:none;">
+  <div class="modal-content">
+    <div id="tradeList" style="height: 700px; overflow-y: auto;"></div>
+  </div>
+</div>
+
+<script>
+  const renewInterval = 1000;
+  const chartContainer = document.getElementById('chart');
+  const tooltip = document.getElementById('tooltip');
+  const chart = LightweightCharts.createChart(chartContainer, {
+    layout: {
+      background: { color: '#1E1E1E' },
+      textColor: '#fff',
+    },
+    grid: {
+      vertLines: { color: '#333' },
+      horzLines: { color: '#333' },
+    },
+    rightPriceScale: {
+      borderColor: '#555',
+    },
+    timeScale: {
+      timeVisible: true,
+      secondsVisible: true,
+      borderColor: '#555',
+    },
+    height: 880,
+  });
+  const candlestickSeries = chart.addCandlestickSeries({
+    upColor: '#4caf50',
+    downColor: '#f44336',
+    borderVisible: false,
+    wickUpColor: '#4caf50',
+    wickDownColor: '#f44336',
+  });
+  const buyVolumeSeries = chart.addHistogramSeries({
+    priceFormat: { type: 'volume' },
+    priceScaleId: 'buyVolumeScale',
+  });
+  const sellVolumeSeries = chart.addHistogramSeries({
+    priceFormat: { type: 'volume' },
+    priceScaleId: 'sellVolumeScale',
+  });
+
+  buyVolumeSeries.priceScale().applyOptions({
+    scaleMargins: { top: 0.85, bottom: 0 },
+    borderColor: '#555',
+  });
+  sellVolumeSeries.priceScale().applyOptions({
+    scaleMargins: { top: 0.85, bottom: 0 },
+    borderColor: '#555',
+  });
+
+  let candlesData = [];
+  let markers = [];
+  let fetchInterval;
+
+  async function fetchAndSetData() {
+    try {
+      const range = chart.timeScale().getVisibleRange();
+      const candlesResponse = await fetch('/candles');
+      candlesData = await candlesResponse.json();
+      candlestickSeries.setData(candlesData);
+
+      const buyVolumeData = candlesData.map(c => ({
+        time: c.time,
+        value: c.buyVolume,
+        color: c.close > c.open ? 'rgba(76, 175, 80, 0.5)' : 'rgba(76, 175, 80, 0.3)',
+      }));
+      buyVolumeSeries.setData(buyVolumeData);
+
+      const sellVolumeData = candlesData.map(c => ({
+        time: c.time,
+        value: c.sellVolume,
+        color: c.close > c.open ? 'rgba(244, 67, 54, 0.5)' : 'rgba(244, 67, 54, 0.3)',
+      }));
+      sellVolumeSeries.setData(sellVolumeData);
+
+      const markersResponse = await fetch('/markers');
+      markers = await markersResponse.json();
+      if (range) {
+        markers =markers.filter(m => m.time >= range.from && m.time <= range.to)
+      }
+      candlestickSeries.setMarkers(markers);
+    } catch (e) {
+      console.error('Error:', e);
+    }
+  }
+  function startFetching() {
+    fetchAndSetData();
+    fetchInterval = setInterval(fetchAndSetData, renewInterval);
+  }
+  function stopFetching() {
+    if (fetchInterval) {
+      clearInterval(fetchInterval);
+      fetchInterval = null;
+    }
+  }
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      stopFetching();
+    } else {
+      startFetching();
+    }
+  });
+  startFetching();
+
+  function candleTradeList(candle){
+    if (!candle.tradeList || candle.tradeList.length < 1) {
+      return "";
+    }
+    let result = `<div><b>Trade list:</b></div>`;
+
+    let prevTime = null;
+    candle.tradeList.forEach((trade, index) => {
+      const sideColor = trade.side === "Buy" ? "green" : "red";
+      const tradeTime = new Date(trade.timestamp);
+      const timeStr = tradeTime.toLocaleTimeString('en-GB', {
+        hour12: false,
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        fractionalSecondDigits: 3
+      });
+
+      if (prevTime !== null && timeStr !== prevTime) {
+        result += `<div style="padding-left: 1em; color:rgba(100,100,100,0.8);">
+         ̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶ ̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶̶</div>`;
+      }
+
+      prevTime = timeStr;
+      result += `<div style="padding-left: 1em; color:${sideColor};">
+      Price: ${trade.price.toFixed(2)}, Volume: ${trade.volume.toFixed(3)}, Side: ${trade.side}, Time: ${timeStr} </div>`;
+    });
+
+    result += `<div><br></div>`;
+
+    return result;
+  }
+
+  function candleInfo(candle, param) {
+    const avgPrice = (candle.tickSum / candle.tickCount).toFixed(2);
+    const buyAvg = (candle.buyVolume / candle.buyCount).toFixed(3);
+    const sellAvg = (candle.sellVolume / candle.sellCount).toFixed(3);
+    const totalCount = candle.buyCount + candle.sellCount;
+    const totalVolume = candle.buyVolume + candle.sellVolume;
+    const totalAvg = (totalVolume / totalCount).toFixed(3);
+    const diff = candle.close - candle.open;
+    const diffPct = (diff * 100) / candle.close;
+
+    let direction, color;
+    if (candle.close > candle.open) {
+      direction = "▲ Bull";
+      color = "green";
+    } else if (candle.close < candle.open) {
+      direction = "▼ Bear";
+      color = "red";
+    } else {
+      direction = "◆ Neutral";
+      color = "gray";
+    }
+
+    let result = `<div><b>Time:</b> ${new Date(candle.time * 1000).toLocaleTimeString()}</div>`;
+    result += `<div><br></div>`;
+    result += `<div><b>Direction | Diff | Diff%:</b> <span style="color:${color};">${direction}</span> | ${diff.toFixed(2)} | ${diffPct.toFixed(2)}%</div>`;
+    result += `<div><b>Open -> Close:</b> ${candle.open.toFixed(2)} -> ${candle.close.toFixed(2)}</div>`;
+    result += `<div><b>Low -> High:</b> ${candle.low.toFixed(2)} -> ${candle.high.toFixed(2)}</div>`;
+    result += `<div><b>Ticks: Count | Sum | AvgPrice:</b> ${candle.tickCount} | ${candle.tickSum.toFixed(2)} | ${avgPrice}</div>`;
+    result += `<div><br></div>`;
+    result += `<div><b>Trades (count | volume | avg ):</b></div>`;
+    result += `<div style="padding-left: 1em;">Buy(${candle.buyCount} | ${candle.buyVolume.toFixed(3)} | ${buyAvg})</div>`;
+    result += `<div style="padding-left: 1em;">Sell(${candle.sellCount} | ${candle.sellVolume.toFixed(3)} | ${sellAvg})</div>`;
+    result += `<div style="padding-left: 1em;">Total(${totalCount} | ${totalVolume.toFixed(3)} | ${totalAvg})</div>`;
+    result += `<div><br></div>`;
+
+    const markersAtTime = markers.filter(ev => ev.time === param.time);
+    if (markersAtTime.length > 0) {
+      result += `<div><b>Markers:</b></div>`;
+      markersAtTime.forEach(marker => {
+        result += `<div class="marker" style="color:${marker.color};"> ${marker.text} | ${marker.details}</div>`;
+      });
+    }
+    result += `<div><br></div>`;
+
+    return result;
+  }
+
+  function showTradesInModal(param) {
+    const modal = document.getElementById('tradeModal');
+    const tradeListDiv = document.getElementById('tradeList');
+
+    const candle = candlesData.find(c => c.time === param.time);
+    if (!candle) {
+      modal.style.display = 'none';
+      return;
+    }
+    tradeListDiv.innerHTML = candleInfo(candle, param)
+    tradeListDiv.innerHTML += candleTradeList(candle)
+
+    modal.style.display = 'block';
+  }
+  chart.subscribeClick((param) => {
+      const modal = document.getElementById('tradeModal');
+      modal.onclick= (event) => {
+        if (modal.style.display === 'block') {
+          modal.style.display = 'none';
+        }
+    };
+
+    showTradesInModal(param);
+  });
+  chart.subscribeCrosshairMove(param => {
+    if (!param.time || !param.point) {
+      tooltip.style.display = 'none';
+      return;
+    }
+
+    const candle = candlesData.find(c => c.time === param.time);
+    if (!candle) {
+      tooltip.style.display = 'none';
+      return;
+    }
+    tooltip.innerHTML = candleInfo(candle, param)
+
+    const coordinate = param.point;
+    const containerRect = chartContainer.getBoundingClientRect();
+
+    let left = coordinate.x + 15;
+    if (left + tooltip.offsetWidth > containerRect.width) {
+      left = coordinate.x - tooltip.offsetWidth - 15;
+    }
+
+    let top = coordinate.y + 15;
+    if (top + tooltip.offsetHeight > containerRect.height) {
+      top = coordinate.y - tooltip.offsetHeight - 15;
+    }
+
+    tooltip.style.left = left + 'px';
+    tooltip.style.top = top + 'px';
+    tooltip.style.display = 'block';
+  });
+</script>
+</body>
+</html>
